@@ -1,0 +1,120 @@
+name: Gofi Nightly Build
+
+on:
+  push:
+    branches:
+      - master
+  schedule:
+    # 每天早上0点构建
+    - cron: "0 0 * * *"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # 配置Golang环境
+      - name: Set up golang
+        uses: actions/setup-go@v2
+        with:
+          go-version: "^1.17"
+      - run: |
+          go env -w GO111MODULE=on
+          go version
+
+      # 配置Node环境
+      - uses: actions/setup-node@v2
+        with:
+          node-version: "^14"
+      - run: node -v
+      - run: yarn -v
+
+      # 检出gofi-output
+      - name: Checkout Trigger Branch
+        uses: actions/checkout@v2
+        with:
+          repository: Sloaix/Gofi-nightly-build
+          ref: refs/heads/master
+
+      # 检出Gofi代码
+      - name: Checkout Trigger Branch
+        uses: actions/checkout@v2
+        with:
+          repository: Sloaix/Gofi
+          ref: refs/heads/master
+          path: Gofi
+
+      - name: Clean
+        run: |
+          ls -l
+          rm -rf production
+          rm -rf preview
+          ls -l
+
+      #  构建
+      - name: Excute Build Script
+        working-directory: Gofi
+        run: |
+          yarn && yarn build
+          ls -l
+          mv output ../production
+          ls -l ../production
+          yarn && yarn build:preview
+          ls -l
+          mv output ../preview 
+          ls -l ../preview
+
+      - name: Commit and push
+        run: |
+          git config --global user.name 'Sloaix'
+          git config --global user.email 'faith.epiphone@qq.com'
+          git status
+          git add production
+          git add preview
+          git commit --amend --no-edit
+          git push -u -f origin master
+
+      # 列出产物
+      - name: List output
+        run: |
+          ls -lh ./production
+          ls -lh ./preview
+
+      # 登录到Docker hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
+
+      # 配置Buildx
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+
+      # 构建Production镜像并且推送到hub
+      - name: Build production and push
+        id: docker_build_production
+        uses: docker/build-push-action@v2
+        with:
+          context: ./
+          file: ./Dockerfile
+          push: true
+          build-args: "OUTPUT_DIR=./production"
+          tags: ${{ secrets.DOCKER_USERNAME }}/gofi:nightly-prod-latest
+
+      - name: Image digest
+        run: echo ${{ steps.ocker_build_production.outputs.digest }}
+
+      # 构建Preview镜像并且推送到hub
+      - name: Build production and push
+        id: docker_build_preview
+        uses: docker/build-push-action@v2
+        with:
+          context: ./
+          file: ./Dockerfile
+          push: true
+          build-args: "OUTPUT_DIR=./preview"
+          tags: ${{ secrets.DOCKER_USERNAME }}/gofi:nightly-preview-latest
+
+      - name: Image digest
+        run: echo ${{ steps.docker_build_preview.outputs.digest }}
